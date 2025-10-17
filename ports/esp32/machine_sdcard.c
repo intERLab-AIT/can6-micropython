@@ -92,9 +92,12 @@ static const spi_bus_config_t spi_bus_defaults[NUM_SD_SPI_BUS] = {
         .mosi_io_num = GPIO_NUM_23,
         .sclk_io_num = GPIO_NUM_18,
         #elif CONFIG_IDF_TARGET_ESP32S3
-        .miso_io_num = GPIO_NUM_36,
-        .mosi_io_num = GPIO_NUM_35,
-        .sclk_io_num = GPIO_NUM_37,
+        //.miso_io_num = GPIO_NUM_36,
+        //.mosi_io_num = GPIO_NUM_35,
+        //.sclk_io_num = GPIO_NUM_37,
+        .miso_io_num = GPIO_NUM_13,
+        .mosi_io_num = GPIO_NUM_11,
+        .sclk_io_num = GPIO_NUM_12,
         #else
         .miso_io_num = GPIO_NUM_NC,
         .mosi_io_num = GPIO_NUM_NC,
@@ -112,9 +115,12 @@ static const spi_bus_config_t spi_bus_defaults[NUM_SD_SPI_BUS] = {
     },
     #if NUM_SD_SPI_BUS > 1
     {
-        .miso_io_num = GPIO_NUM_2,
-        .mosi_io_num = GPIO_NUM_15,
-        .sclk_io_num = GPIO_NUM_14,
+        .miso_io_num = GPIO_NUM_13,
+        .mosi_io_num = GPIO_NUM_11,
+        .sclk_io_num = GPIO_NUM_12,
+        //.miso_io_num = GPIO_NUM_2,
+        //.mosi_io_num = GPIO_NUM_15,
+        //.sclk_io_num = GPIO_NUM_14,
         .data2_io_num = GPIO_NUM_NC,
         .data3_io_num = GPIO_NUM_NC,
         .data4_io_num = GPIO_NUM_NC,
@@ -143,7 +149,8 @@ static const sdspi_device_config_t spi_dev_defaults[NUM_SD_SPI_BUS] = {
         .gpio_cs = GPIO_NUM_5,
         #elif CONFIG_IDF_TARGET_ESP32S3
         .host_id = SPI3_HOST,
-        .gpio_cs = GPIO_NUM_34,
+        //.gpio_cs = GPIO_NUM_34,
+        .gpio_cs = GPIO_NUM_10,
         #else
         .host_id = SPI3_HOST,
         .gpio_cs = GPIO_NUM_NC,
