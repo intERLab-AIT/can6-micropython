@@ -1,0 +1,22 @@
+{
+    "name": "CANARIN_V5",
+    "title": "Canarin V5",
+    "version": "1.0",
+    "cpu": "ESP32",
+    "port": "esp32",
+    "board": "CANARIN_V5",
+    "description": "ESP32-based environmental monitoring board with BME280, multiple UART sensors, and SD card storage.",
+    "keywords": ["ESP32", "Environmental", "Hazemon", "Sensors"],
+    "features": [
+        "BME280 temperature/pressure/humidity sensor",
+        "ISL1219 external RTC",
+        "PMS7003 particulate matter sensor",
+        "MH-Z16 CO2 sensor",
+        "ZE07-CO carbon monoxide sensor",
+        "u-blox NEO GPS",
+        "SD card storage",
+        "WiFi",
+        "UART multiplexer (8-channel)",
+        "ADC multiplexer (4-channel)"
+    ]
+}
