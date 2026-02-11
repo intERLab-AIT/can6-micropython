@@ -2,6 +2,7 @@
 
 import time
 import os
+import network
 from machine import I2C
 
 from canarin import (
@@ -29,9 +30,6 @@ W = 50
 _results = []
 _log_lines = []
 
-OK = "OK"
-FAIL = "FAIL"
-
 
 def _emit(line):
     print(line)
@@ -53,28 +51,27 @@ def _bar(char="="):
     _emit(char * W)
 
 
+def _get_mac():
+    """Return the ESP32 STA MAC address as a hex string (e.g. 'AA:BB:CC:DD:EE:FF')."""
+    mac = network.WLAN(network.STA_IF).config('mac')
+    return ":".join("{:02X}".format(b) for b in mac)
+
+
 # -- Retry helper ------------------------------------------------------------
-def _retry_read(tag, name, sensor, fmt_fn, range_fn, timeout_ms=None, delay_ms=1000):
-    for attempt in range(MAX_RETRIES):
-        try:
-            val = sensor.read() if timeout_ms is None else sensor.read(timeout_ms=timeout_ms)
-            if val is not None and range_fn(val):
-                detail = fmt_fn(val)
-                if attempt > 0:
-                    detail += " (retry {})".format(attempt)
-                _result(tag, name, True, detail)
-                return
-        except Exception:
-            pass
-        time.sleep_ms(delay_ms)
-    _result(tag, name, False, "no response after {} tries".format(MAX_RETRIES))
+def _retry(tag, name, read_fn, fmt_fn, ok_fn=None, max_retries=MAX_RETRIES, delay_ms=1000):
+    """
+    Generic retry wrapper for sensor reads or detect calls.
 
-
-def _retry_detect(tag, name, detect_fn, fmt_fn, delay_ms=1000):
-    for attempt in range(MAX_RETRIES):
+    read_fn: callable returning a value (or None on failure)
+    fmt_fn:  callable(value) -> detail string
+    ok_fn:   callable(value) -> bool for range validation (default: truthy check)
+    """
+    if ok_fn is None:
+        ok_fn = lambda v: bool(v)
+    for attempt in range(max_retries):
         try:
-            val = detect_fn()
-            if val:
+            val = read_fn()
+            if val is not None and ok_fn(val):
                 detail = fmt_fn(val)
                 if attempt > 0:
                     detail += " (retry {})".format(attempt)
@@ -83,7 +80,7 @@ def _retry_detect(tag, name, detect_fn, fmt_fn, delay_ms=1000):
         except Exception:
             pass
         time.sleep_ms(delay_ms)
-    _result(tag, name, False, "not found after {} tries".format(MAX_RETRIES))
+    _result(tag, name, False, "no response after {} tries".format(max_retries))
     return None
 
 
@@ -124,7 +121,6 @@ def test_sd_card():
 
 
 def test_wifi():
-    import network
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     time.sleep(1)
@@ -187,7 +183,6 @@ def test_rtc(i2c):
         _result("RTC", "ISL1219", False, "readback failed")
         return
 
-    # Tick test
     t0 = rtc.get_time()
     time.sleep(5)
     t1 = rtc.get_time()
@@ -209,10 +204,10 @@ def test_sensors(i2c):
     # BME280
     try:
         bme = BME280(i2c)
-        _retry_read(
-            "SENSOR", "BME280", bme,
+        _retry(
+            "SENSOR", "BME280", bme.read,
             fmt_fn=lambda v: "T={:.1f}C P={:.0f}hPa H={:.0f}%".format(*v),
-            range_fn=lambda v: (-40 <= v[0] <= 85) and (300 <= v[1] <= 1100) and (0 <= v[2] <= 100),
+            ok_fn=lambda v: (-40 <= v[0] <= 85) and (300 <= v[1] <= 1100) and (0 <= v[2] <= 100),
         )
     except Exception as e:
         _result("SENSOR", "BME280", False, str(e))
@@ -227,11 +222,10 @@ def test_sensors(i2c):
     # PMS7003
     try:
         pms = PMS7003(umux, port=UPORT_PMS7003)
-        _retry_read(
-            "SENSOR", "PMS7003", pms,
+        _retry(
+            "SENSOR", "PMS7003", lambda: pms.read(timeout_ms=5000),
             fmt_fn=lambda d: "PM2.5={} PM10={}".format(d["pm2_5_atm"], d["pm10_atm"]),
-            range_fn=lambda d: 0 <= d["pm2_5_atm"] <= 999,
-            timeout_ms=5000,
+            ok_fn=lambda d: 0 <= d["pm2_5_atm"] <= 999,
         )
     except Exception as e:
         _result("SENSOR", "PMS7003", False, str(e))
@@ -239,10 +233,10 @@ def test_sensors(i2c):
     # MHZ16
     try:
         mhz = MHZ16(umux, port=UPORT_MHZ16)
-        _retry_read(
-            "SENSOR", "MHZ16", mhz,
+        _retry(
+            "SENSOR", "MHZ16", mhz.read,
             fmt_fn=lambda v: "CO2={} ppm".format(v),
-            range_fn=lambda v: 0 <= v <= 5000,
+            ok_fn=lambda v: 0 <= v <= 5000,
             delay_ms=2000,
         )
     except Exception as e:
@@ -251,10 +245,10 @@ def test_sensors(i2c):
     # ZE07CO
     try:
         ze = ZE07CO(umux, port=UPORT_ZE07CO)
-        _retry_read(
-            "SENSOR", "ZE07CO", ze,
+        _retry(
+            "SENSOR", "ZE07CO", ze.read,
             fmt_fn=lambda v: "CO={:.1f} ppm".format(v),
-            range_fn=lambda v: 0 <= v <= 500,
+            ok_fn=lambda v: 0 <= v <= 500,
             delay_ms=2000,
         )
     except Exception as e:
@@ -263,7 +257,7 @@ def test_sensors(i2c):
     # GPS
     try:
         gps = UBloxGPS(umux, port=UPORT_GPS)
-        _retry_detect(
+        _retry(
             "SENSOR", "GPS", gps.detect,
             fmt_fn=lambda v: "SW={} HW={}".format(v["sw_version"], v["hw_version"]),
         )
@@ -307,8 +301,9 @@ def print_summary():
 def main():
     info = os.uname()
     _bar()
-    _emit("  CANARIN V5 MFG TEST")
+    _emit("  CANARIN V5 TEST")
     _emit("  FW: {}".format(info.version))
+    _emit("  MAC: {}".format(_get_mac()))
     _bar()
 
     i2c = I2C(0)

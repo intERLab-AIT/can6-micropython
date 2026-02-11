@@ -42,11 +42,9 @@ class BME280:
 
     _CHIP_ID  = 0x60
     _RESET_CMD = 0xB6
-    
+
     _CTRL_HUM_OS1 = 0b00000001
-    _CTRL_MEAS_SLEEP = 0b00100100
     _CTRL_MEAS_FORCED = 0b00100101
-    _CTRL_MEAS_NORMAL = 0b01010111
     _CONFIG = 0b00010000
 
     def __init__(self, i2c, addr=0x76):
@@ -221,7 +219,7 @@ class UARTPortMux:
     def select(self, port):
         self._mux.select(port)
         self._mux.enable(True)
-        time.sleep_ms(50)  # Allow time for sensor to respond after mux switching
+        time.sleep_ms(50)
 
     def read(self, nbytes=None):
         if nbytes:
@@ -291,56 +289,41 @@ class ADCPortMux:
 
 # ExternalRTC (ISL1219)
 class ExternalRTC:
-    """
-    External RTC driver for ISL1219 over I2C.
-    
-    The ISL1219 is a real-time clock/calendar with I2C interface.
-    Default address: 0x6F
-    """
+    """External RTC driver for ISL1219 over I2C. Default address: 0x6F."""
 
-    # Register addresses
-    _REG_RTC_SC   = 0x00
-    _REG_RTC_MN   = 0x01
-    _REG_RTC_HR   = 0x02
-    _REG_RTC_DT   = 0x03
-    _REG_RTC_MO   = 0x04
-    _REG_RTC_YR   = 0x05
-    _REG_RTC_DW   = 0x06
+    _REG_RTC_SC = 0x00
+    _HR_MIL     = 0x80
 
-    # Hour register bits
-    _HR_MIL       = 0x80
-    
     def __init__(self, i2c, addr=0x6F):
         self.i2c = i2c
         self.addr = addr
-        self._init_rtc()
+        if addr not in i2c.scan():
+            raise Exception("ExternalRTC not found at address 0x{:02X}".format(addr))
 
-    def _init_rtc(self):
-        devices = self.i2c.scan()
-        if self.addr not in devices:
-            raise Exception("ExternalRTC not found at address 0x{:02X}".format(self.addr))
-
-    def _bcd2dec(self, bcd):
+    @staticmethod
+    def _bcd2dec(bcd):
         return (bcd >> 4) * 10 + (bcd & 0x0F)
 
-    def _dec2bcd(self, dec):
+    @staticmethod
+    def _dec2bcd(dec):
         return (dec // 10) << 4 | (dec % 10)
 
     def get_time(self):
         """
         Returns (year, month, day, weekday, hour, minute, second) or None.
-        Format: year=4-digit, month=1-12, day=1-31, weekday=1-7, hour=0-23, minute=0-59, second=0-59
+        year=4-digit, month=1-12, day=1-31, weekday=1-7, hour=0-23
         """
         try:
-            data = self.i2c.readfrom_mem(self.addr, self._REG_RTC_SC, 7)
-            ss = self._bcd2dec(data[0])
-            mm = self._bcd2dec(data[1])
-            hh = self._bcd2dec(data[2] & 0x3F)
-            dd = self._bcd2dec(data[3])
-            mon = self._bcd2dec(data[4])
-            yy = self._bcd2dec(data[5]) + 2000
-            wd = data[6] & 0x07
-            return (yy, mon, dd, wd, hh, mm, ss)
+            d = self.i2c.readfrom_mem(self.addr, self._REG_RTC_SC, 7)
+            return (
+                self._bcd2dec(d[5]) + 2000,
+                self._bcd2dec(d[4]),
+                self._bcd2dec(d[3]),
+                d[6] & 0x07,
+                self._bcd2dec(d[2] & 0x3F),
+                self._bcd2dec(d[1]),
+                self._bcd2dec(d[0]),
+            )
         except Exception as e:
             print("Error reading RTC:", e)
             return None
@@ -348,7 +331,7 @@ class ExternalRTC:
     def set_time(self, year, month, day, weekday, hour, minute, second):
         """
         Set RTC time. Returns True on success.
-        Parameters: year (4-digit), month=1-12, day=1-31, weekday=1-7 (Sunday=1), hour=0-23, minute=0-59, second=0-59
+        year (4-digit), month=1-12, day=1-31, weekday=1-7, hour=0-23
         """
         try:
             data = bytearray(7)
@@ -366,16 +349,9 @@ class ExternalRTC:
             return False
 
 
-# PMS7003 - Plantower Particulate Matter sensor (UART)
-class PMS7003:
-    """PMS7003 PM sensor driver (passive/Q&A mode, 9600 baud)."""
-
-    _START1 = 0x42
-    _START2 = 0x4D
-    _FRAME_LEN = 32
-
-    _CMD_PASSIVE = bytes([0x42, 0x4D, 0xE1, 0x00, 0x00, 0x01, 0x70])
-    _CMD_READ    = bytes([0x42, 0x4D, 0xE2, 0x00, 0x00, 0x01, 0x71])
+# _MuxUARTSensor - shared base for UART sensors that use UARTPortMux
+class _MuxUARTSensor:
+    """Base class for UART sensors connected via UARTPortMux or direct UART."""
 
     def __init__(self, uart_or_mux, port=None):
         if isinstance(uart_or_mux, UARTPortMux):
@@ -386,11 +362,6 @@ class PMS7003:
             self._mux = None
             self._port = None
             self._uart = uart_or_mux
-        self._select()
-        self._flush()
-        self._uart.write(self._CMD_PASSIVE)
-        time.sleep_ms(100)
-        self._flush()
 
     def _select(self):
         if self._mux is not None and self._port is not None:
@@ -399,6 +370,26 @@ class PMS7003:
     def _flush(self):
         while self._uart.any():
             self._uart.read(self._uart.any())
+
+
+# PMS7003 - Plantower Particulate Matter sensor (UART)
+class PMS7003(_MuxUARTSensor):
+    """PMS7003 PM sensor driver (passive/Q&A mode, 9600 baud)."""
+
+    _START1 = 0x42
+    _START2 = 0x4D
+    _FRAME_LEN = 32
+
+    _CMD_PASSIVE = bytes([0x42, 0x4D, 0xE1, 0x00, 0x00, 0x01, 0x70])
+    _CMD_READ    = bytes([0x42, 0x4D, 0xE2, 0x00, 0x00, 0x01, 0x71])
+
+    def __init__(self, uart_or_mux, port=None):
+        super().__init__(uart_or_mux, port)
+        self._select()
+        self._flush()
+        self._uart.write(self._CMD_PASSIVE)
+        time.sleep_ms(100)
+        self._flush()
 
     @staticmethod
     def _checksum_ok(frame):
@@ -472,38 +463,31 @@ class PMS7003:
         return self._parse(frame)
 
 
-# MHZ16 - Winsen MH-Z16 NDIR CO2 sensor (UART)
-class MHZ16:
-    """MH-Z16 CO2 sensor driver (Q&A mode, 9600 baud)."""
+# _WinsenSensor - shared base for Winsen 9-byte frame protocol sensors
+class _WinsenSensor(_MuxUARTSensor):
+    """
+    Base for Winsen sensors using the 9-byte frame protocol (MH-Z16, ZE07-CO).
 
-    _CMD_QA_MODE = bytes([0xFF, 0x01, 0x78, 0x41, 0x00, 0x00, 0x00, 0x00, 0x46])
-    _CMD_READ    = bytes([0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79])
+    Subclasses set _CMD_INIT, _CMD_READ and implement _parse_value(frame).
+    Frame format: [START=0xFF][CMD=0x86][data...][checksum]
+    Checksum: sum of bytes 0..7 == 0x00 (mod 256).
+    """
+
     _FRAME_LEN = 9
     _START_BYTE = 0xFF
     _CMD_BYTE = 0x86
 
+    _CMD_INIT = None  # Subclasses override
+    _CMD_READ = None  # Subclasses override
+
     def __init__(self, uart_or_mux, port=None):
-        if isinstance(uart_or_mux, UARTPortMux):
-            self._mux = uart_or_mux
-            self._port = port
-            self._uart = uart_or_mux.uart
-        else:
-            self._mux = None
-            self._port = None
-            self._uart = uart_or_mux
+        super().__init__(uart_or_mux, port)
         self._select()
         self._flush()
-        self._uart.write(self._CMD_QA_MODE)
-        time.sleep_ms(100)
-        self._flush()
-
-    def _select(self):
-        if self._mux is not None and self._port is not None:
-            self._mux.select(self._port)
-
-    def _flush(self):
-        while self._uart.any():
-            self._uart.read(self._uart.any())
+        if self._CMD_INIT:
+            self._uart.write(self._CMD_INIT)
+            time.sleep_ms(100)
+            self._flush()
 
     def _read_frame(self, timeout_ms=1000):
         self._select()
@@ -546,94 +530,43 @@ class MHZ16:
 
         return None
 
+    def _parse_value(self, frame):
+        """Subclasses override to extract the sensor value from a valid frame."""
+        raise NotImplementedError
+
     def read(self, timeout_ms=1000):
-        """Return CO2 in ppm, or None on timeout."""
+        """Return parsed sensor value, or None on timeout."""
         frame = self._read_frame(timeout_ms)
         if frame is None:
             return None
+        return self._parse_value(frame)
+
+
+# MHZ16 - Winsen MH-Z16 NDIR CO2 sensor (UART)
+class MHZ16(_WinsenSensor):
+    """MH-Z16 CO2 sensor driver (Q&A mode, 9600 baud)."""
+
+    _CMD_INIT = bytes([0xFF, 0x01, 0x78, 0x41, 0x00, 0x00, 0x00, 0x00, 0x46])
+    _CMD_READ = bytes([0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79])
+
+    def _parse_value(self, frame):
+        """Return CO2 in ppm."""
         return frame[1] * 256 + frame[2]
 
 
 # ZE07CO - Winsen ZE07-CO electrochemical CO sensor (UART)
-class ZE07CO:
+class ZE07CO(_WinsenSensor):
     """ZE07-CO carbon-monoxide sensor driver (Q&A mode, 9600 baud)."""
 
-    _CMD_QA_MODE = bytes([0xFF, 0x01, 0x78, 0x41, 0x00, 0x00, 0x00, 0x00, 0x46])
-    _CMD_READ    = bytes([0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79])
-    _FRAME_LEN = 9
-    _START_BYTE = 0xFF
-    _CMD_BYTE = 0x86
+    _CMD_INIT = bytes([0xFF, 0x01, 0x78, 0x41, 0x00, 0x00, 0x00, 0x00, 0x46])
+    _CMD_READ = bytes([0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79])
 
     def __init__(self, uart_or_mux, port=None, bias=0.0):
-        if isinstance(uart_or_mux, UARTPortMux):
-            self._mux = uart_or_mux
-            self._port = port
-            self._uart = uart_or_mux.uart
-        else:
-            self._mux = None
-            self._port = None
-            self._uart = uart_or_mux
         self.bias = bias
-        self._select()
-        self._flush()
-        self._uart.write(self._CMD_QA_MODE)
-        time.sleep_ms(100)
-        self._flush()
+        super().__init__(uart_or_mux, port)
 
-    def _select(self):
-        if self._mux is not None and self._port is not None:
-            self._mux.select(self._port)
-
-    def _flush(self):
-        while self._uart.any():
-            self._uart.read(self._uart.any())
-
-    def _read_frame(self, timeout_ms=1000):
-        self._select()
-        self._flush()
-        self._uart.write(self._CMD_READ)
-
-        buf = bytearray(self._FRAME_LEN)
-        pos = 0
-        start_found = False
-        deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
-
-        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
-            if not self._uart.any():
-                time.sleep_ms(5)
-                continue
-            b = self._uart.read(1)
-            if b is None:
-                continue
-            ch = b[0]
-
-            if not start_found:
-                if ch == self._START_BYTE:
-                    start_found = True
-                    pos = 0
-                continue
-
-            buf[pos] = ch
-            pos += 1
-
-            if pos == 1 and ch != self._CMD_BYTE:
-                start_found = False
-                pos = 0
-                continue
-
-            if pos == self._FRAME_LEN - 1:
-                if sum(buf[0:8]) & 0xFF == 0:
-                    return buf
-                start_found = False
-                pos = 0
-
-        return None
-
-    def read(self, timeout_ms=1000):
-        """Return CO in ppm (float), or None on timeout."""
-        frame = self._read_frame(timeout_ms)
-        if frame is None:
-            return None
+    def _parse_value(self, frame):
+        """Return CO in ppm (float)."""
         val = (frame[1] * 256 + frame[2]) * 0.1 + self.bias
         return max(0.0, val)
 
@@ -642,10 +575,9 @@ class ZE07CO:
 class NetPort:
     """
     Access to NETPORT UART (UART2).
-    
+
     Used for cellular modules (e.g., SIM7600) or Ethernet.
     Pinout: TX=GPIO32, RX=GPIO35, PERST=GPIO13
-    Baudrate: 9600 default
     """
 
     def __init__(self, uart_id=1, baudrate=9600, timeout_ms=1000, **uart_kwargs):
@@ -689,10 +621,10 @@ class NetPort:
 
 
 # UBloxGPS - u-blox NEO GPS receiver (UART, UBX binary protocol)
-class UBloxGPS:
+class UBloxGPS(_MuxUARTSensor):
     """
     u-blox NEO GPS driver using UBX binary protocol (9600 baud).
-    
+
     Supports NEO-M8M and compatible u-blox GPS modules.
     Configurable for continuous or power-save mode.
     """
@@ -700,7 +632,6 @@ class UBloxGPS:
     _SYNC1 = 0xB5
     _SYNC2 = 0x62
 
-    # Message classes and IDs
     _NAV_PVT_CLASS = 0x01
     _NAV_PVT_ID = 0x07
     _MON_VER_CLASS = 0x0A
@@ -712,37 +643,16 @@ class UBloxGPS:
     _CFG_RATE_CLASS = 0x06
     _CFG_RATE_ID = 0x08
 
-    # PVT validity flags
     _PVT_VALID_DATE = 0x01
     _PVT_VALID_TIME = 0x02
     _PVT_FULLY_RESOLVED = 0x04
 
     def __init__(self, uart_or_mux, port=None, configure=True, power_save=False):
-        """
-        Initialize GPS driver.
-        
-        Args:
-            uart_or_mux: UART object or UARTPortMux instance
-            port: Port number if using multiplexer
-            configure: If True, auto-configure GPS on init
-            power_save: If True, enable power-save mode (lp_mode=1)
-        """
-        if isinstance(uart_or_mux, UARTPortMux):
-            self._mux = uart_or_mux
-            self._port = port
-            self._uart = uart_or_mux.uart
-        else:
-            self._mux = None
-            self._port = None
-            self._uart = uart_or_mux
+        super().__init__(uart_or_mux, port)
         self._power_save = power_save
         if configure:
             self._select()
             self._configure()
-
-    def _select(self):
-        if self._mux is not None and self._port is not None:
-            self._mux.select(self._port)
 
     @staticmethod
     def _ubx_checksum(data):
@@ -775,10 +685,6 @@ class UBloxGPS:
         if frame[6 + length] != ck_a or frame[7 + length] != ck_b:
             return None
         return (msg_class, msg_id, payload)
-
-    def _flush(self):
-        while self._uart.any():
-            self._uart.read(self._uart.any())
 
     def _recv_ubx(self, timeout_ms=1000):
         buf = bytearray(256)
@@ -838,37 +744,21 @@ class UBloxGPS:
         return self._ubx_decode(frame)
 
     def _configure(self, meas_rate_ms=None):
-        """
-        Configure GPS for UBX-only mode and set power/rate.
-        
-        Args:
-            meas_rate_ms: Measurement rate in ms (default: 30000=30s in power-save, 250=4Hz in continuous)
-        """
-        # Configure port for UBX protocol at 9600 baud
+        """Configure GPS for UBX-only mode and set power/rate."""
         cfg_prt = struct.pack('<BBHIIHHHxx',
-                              0x01,     # portID: 1 = UART1
-                              0x00,     # reserved
-                              0x0000,   # txReady
-                              0x08C0,   # mode: 8N1 (UART with no parity, 8 bits, 1 stop)
-                              9600,     # baudRate
-                              0x0001,   # inProtoMask: UBX only
-                              0x0001,   # outProtoMask: UBX only
-                              0x0000)   # flags
+                              0x01, 0x00, 0x0000, 0x08C0, 9600,
+                              0x0001, 0x0001, 0x0000)
         self._command(self._CFG_PRT_CLASS, self._CFG_PRT_ID, cfg_prt, timeout_ms=500)
         time.sleep_ms(100)
-        
-        # Configure power mode
+
         lp_mode = 0x01 if self._power_save else 0x00
         cfg_rxm = struct.pack('<BB', 0x00, lp_mode)
         self._command(self._CFG_RXM_CLASS, self._CFG_RXM_ID, cfg_rxm, timeout_ms=500)
         time.sleep_ms(100)
-        
-        # Configure measurement rate
+
         if meas_rate_ms is None:
             meas_rate_ms = 30000 if self._power_save else 250
-        nav_rate = 1  # Always 1
-        time_ref = 0  # 0 = UTC time
-        cfg_rate = struct.pack('<HHH', meas_rate_ms, nav_rate, time_ref)
+        cfg_rate = struct.pack('<HHH', meas_rate_ms, 1, 0)
         self._command(self._CFG_RATE_CLASS, self._CFG_RATE_ID, cfg_rate, timeout_ms=500)
 
     def detect(self):
