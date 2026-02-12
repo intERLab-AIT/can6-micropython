@@ -4,11 +4,11 @@
 #endif
 
 #ifndef MICROPY_HW_MCU_NAME
-#define MICROPY_HW_MCU_NAME "ESP32"
+#define MICROPY_HW_MCU_NAME   "ESP32S3"
 #endif
 
 // Network config
-#define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "canarin-v5"
+#define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT "canarin-v6"
 
 // ------------------------------------------------------------------
 // MicroPython Default Peripheral Pins
@@ -21,13 +21,12 @@
 // pins.csv and accessible via Pin.board.NAME in Python.
 
 // I2C0 - Default I2C pins (BME280, External RTC)
-// I2C_NUM_0, SDA=GPIO21, SCL=GPIO22, 100kHz
-#define MICROPY_HW_I2C0_SCL         (22)
-#define MICROPY_HW_I2C0_SDA         (21)
+#define MICROPY_HW_I2C0_SCL         (2)
+#define MICROPY_HW_I2C0_SDA         (1)
 
 // SPI1 - Default SPI pins for SD Card (MOSI, MISO, SCK)
 // Note: CS pin must be specified explicitly in Python code via Pin.board.SDSPI_CS
-#define MICROPY_HW_SPI1_MOSI        (23)
-#define MICROPY_HW_SPI1_MISO        (19)
-#define MICROPY_HW_SPI1_SCK         (18)
+#define MICROPY_HW_SPI1_MOSI        (11)
+#define MICROPY_HW_SPI1_MISO        (13)
+#define MICROPY_HW_SPI1_SCK         (12)
 

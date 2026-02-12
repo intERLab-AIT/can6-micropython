@@ -1,0 +1,8 @@
+{
+    "deploy_options": {
+        "flash_offset": "0"
+    },
+    "mcu": "esp32s3",
+    "product": "Canarin V6",
+    "vendor": "IntERLAB"
+}

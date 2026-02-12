@@ -1,4 +1,4 @@
-set(IDF_TARGET esp32)
+set(IDF_TARGET esp32s3)
 
 set(SDKCONFIG_DEFAULTS
     boards/sdkconfig.base
