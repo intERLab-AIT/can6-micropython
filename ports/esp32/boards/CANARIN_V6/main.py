@@ -1,4 +1,4 @@
-# Canarin V5 - Manufacturing Test
+# Canarin Manufacturing Test
 
 import time
 import os
@@ -9,6 +9,9 @@ from canarin import (
     BME280, ExternalRTC,
     UARTPortMux, PMS7003, MHZ16, ZE07CO, UBloxGPS,
     mount_sd, umount_sd,
+    get_version,
+    enable_sensor_power, disable_sensor_power,
+    enable_netport_power, disable_netport_power,
 )
 
 # -- Configuration -----------------------------------------------------------
@@ -16,10 +19,35 @@ WIFI_SSID = "Canarin"
 WIFI_PASS = "interlab"
 WIFI_TIMEOUT_S = 10
 
-UPORT_PMS7003 = 1
-UPORT_MHZ16   = 3
-UPORT_GPS     = 6
-UPORT_ZE07CO  = 7
+# Get board version and set configuration
+BOARD_VERSION = get_version()
+
+if BOARD_VERSION == "V5":
+    BOARD_NAME = "CANARIN V5"
+    UPORT_PMS7003 = 1
+    UPORT_MHZ16 = 3
+    UPORT_GPS = 6
+    UPORT_ZE07CO = 7
+    HAS_MHZ16 = True
+    HAS_ZE07CO = True
+    LOG_PREFIX = "CAN5_MFG_"
+    POWER_CONTROL = False
+elif BOARD_VERSION == "V6":
+    BOARD_NAME = "CANARIN V6"
+    UPORT_PMS7003 = 0
+    UPORT_MHZ16 = None
+    UPORT_GPS = 2
+    UPORT_ZE07CO = None
+    HAS_MHZ16 = False
+    HAS_ZE07CO = False
+    LOG_PREFIX = "CAN6_MFG_"
+    POWER_CONTROL = True
+else:
+    raise ValueError("Unknown board version: {}".format(BOARD_VERSION))
+
+# Board-specific constants from canarin module
+RTC_ADDR = ExternalRTC.RTC_ADDR
+RTC_NAME = ExternalRTC.RTC_NAME
 
 MOUNT_POINT = "/sd"
 LOG_FILE = MOUNT_POINT + "/mfg_test_log.txt"
@@ -105,7 +133,7 @@ def test_sd_card():
     ok = False
     try:
         test_file = MOUNT_POINT + "/mfg_test.txt"
-        test_data = "CAN5_MFG_{}".format(time.time())
+        test_data = "{}{}".format(LOG_PREFIX, time.time())
         with open(test_file, "w") as f:
             f.write(test_data)
         with open(test_file, "r") as f:
@@ -164,30 +192,34 @@ def test_wifi():
 
 
 def test_rtc(i2c):
+    if RTC_ADDR not in i2c.scan():
+        _result("RTC", RTC_NAME, False, "not on I2C bus")
+        return
+
     try:
-        rtc = ExternalRTC(i2c)
+        rtc = ExternalRTC(i2c, addr=RTC_ADDR)
     except Exception as e:
-        _result("RTC", "ISL1219", False, str(e))
+        _result("RTC", RTC_NAME, False, str(e))
         return
 
     yr, mo, dy, wd, hr, mn, sc = 2025, 1, 15, 4, 12, 30, 0
     try:
         rtc.set_time(yr, mo, dy, wd, hr, mn, sc)
     except Exception as e:
-        _result("RTC", "ISL1219", False, "set: " + str(e))
+        _result("RTC", RTC_NAME, False, "set: " + str(e))
         return
 
     time.sleep_ms(100)
     t = rtc.get_time()
     if t is None:
-        _result("RTC", "ISL1219", False, "readback failed")
+        _result("RTC", RTC_NAME, False, "readback failed")
         return
 
     t0 = rtc.get_time()
     time.sleep(5)
     t1 = rtc.get_time()
     if t0 is None or t1 is None:
-        _result("RTC", "ISL1219", False, "tick read failed")
+        _result("RTC", RTC_NAME, False, "tick read failed")
         return
 
     s0 = t0[4] * 3600 + t0[5] * 60 + t0[6]
@@ -197,20 +229,23 @@ def test_rtc(i2c):
         elapsed += 86400
 
     ok = 4 <= elapsed <= 7
-    _result("RTC", "ISL1219", ok, "set/get/tick {}s".format(elapsed))
+    _result("RTC", RTC_NAME, ok, "set/get/tick {}s".format(elapsed))
 
 
 def test_sensors(i2c):
-    # BME280
-    try:
-        bme = BME280(i2c)
-        _retry(
-            "SENSOR", "BME280", bme.read,
-            fmt_fn=lambda v: "T={:.1f}C P={:.0f}hPa H={:.0f}%".format(*v),
-            ok_fn=lambda v: (-40 <= v[0] <= 85) and (300 <= v[1] <= 1100) and (0 <= v[2] <= 100),
-        )
-    except Exception as e:
-        _result("SENSOR", "BME280", False, str(e))
+    # BME280 — skip quickly if not on bus
+    if 0x76 in i2c.scan():
+        try:
+            bme = BME280(i2c)
+            _retry(
+                "SENSOR", "BME280", bme.read,
+                fmt_fn=lambda v: "T={:.1f}C P={:.0f}hPa H={:.0f}%".format(*v),
+                ok_fn=lambda v: (-40 <= v[0] <= 85) and (300 <= v[1] <= 1100) and (0 <= v[2] <= 100),
+            )
+        except Exception as e:
+            _result("SENSOR", "BME280", False, str(e))
+    else:
+        _result("SENSOR", "BME280", False, "not on I2C bus")
 
     # UART sensors via mux
     try:
@@ -223,40 +258,40 @@ def test_sensors(i2c):
     try:
         pms = PMS7003(umux, port=UPORT_PMS7003)
         _retry(
-            "SENSOR", "PMS7003", lambda: pms.read(timeout_ms=5000),
+            "SENSOR", "PMS7003", lambda: pms.read(timeout_ms=2000),
             fmt_fn=lambda d: "PM2.5={} PM10={}".format(d["pm2_5_atm"], d["pm10_atm"]),
             ok_fn=lambda d: 0 <= d["pm2_5_atm"] <= 999,
         )
     except Exception as e:
         _result("SENSOR", "PMS7003", False, str(e))
 
-    # MHZ16
-    try:
-        mhz = MHZ16(umux, port=UPORT_MHZ16)
-        _retry(
-            "SENSOR", "MHZ16", mhz.read,
-            fmt_fn=lambda v: "CO2={} ppm".format(v),
-            ok_fn=lambda v: 0 <= v <= 5000,
-            delay_ms=2000,
-        )
-    except Exception as e:
-        _result("SENSOR", "MHZ16", False, str(e))
+    # MHZ16 (V5 only)
+    if HAS_MHZ16 and UPORT_MHZ16 is not None:
+        try:
+            mhz = MHZ16(umux, port=UPORT_MHZ16)
+            _retry(
+                "SENSOR", "MHZ16", mhz.read,
+                fmt_fn=lambda v: "CO2={} ppm".format(v),
+                ok_fn=lambda v: 0 <= v <= 5000,
+            )
+        except Exception as e:
+            _result("SENSOR", "MHZ16", False, str(e))
 
-    # ZE07CO
-    try:
-        ze = ZE07CO(umux, port=UPORT_ZE07CO)
-        _retry(
-            "SENSOR", "ZE07CO", ze.read,
-            fmt_fn=lambda v: "CO={:.1f} ppm".format(v),
-            ok_fn=lambda v: 0 <= v <= 500,
-            delay_ms=2000,
-        )
-    except Exception as e:
-        _result("SENSOR", "ZE07CO", False, str(e))
+    # ZE07CO (V5 only)
+    if HAS_ZE07CO and UPORT_ZE07CO is not None:
+        try:
+            ze = ZE07CO(umux, port=UPORT_ZE07CO)
+            _retry(
+                "SENSOR", "ZE07CO", ze.read,
+                fmt_fn=lambda v: "CO={:.1f} ppm".format(v),
+                ok_fn=lambda v: 0 <= v <= 500,
+            )
+        except Exception as e:
+            _result("SENSOR", "ZE07CO", False, str(e))
 
-    # GPS
+    # GPS — skip configure to avoid long blocking waits when absent
     try:
-        gps = UBloxGPS(umux, port=UPORT_GPS)
+        gps = UBloxGPS(umux, port=UPORT_GPS, configure=False)
         _retry(
             "SENSOR", "GPS", gps.detect,
             fmt_fn=lambda v: "SW={} HW={}".format(v["sw_version"], v["hw_version"]),
@@ -301,10 +336,15 @@ def print_summary():
 def main():
     info = os.uname()
     _bar()
-    _emit("  CANARIN V5 TEST")
+    _emit("  {} TEST".format(BOARD_NAME))
     _emit("  FW: {}".format(info.version))
     _emit("  MAC: {}".format(_get_mac()))
     _bar()
+
+    if POWER_CONTROL:
+        enable_sensor_power()
+        enable_netport_power()
+        time.sleep(1)
 
     i2c = I2C(0)
 
@@ -315,6 +355,10 @@ def main():
     test_sensors(i2c)
     print_summary()
     save_log(_log_lines)
+
+    if POWER_CONTROL:
+        disable_sensor_power()
+        disable_netport_power()
 
 
 main()

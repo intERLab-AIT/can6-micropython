@@ -1,11 +1,51 @@
 import os
 import time
 import struct
-from machine import Pin, I2C, UART, ADC, SDCard
+from machine import Pin, I2C, UART, SDCard
 
 
 # Pin definitions are sourced from pins.csv
 # Access via Pin.board.NAME (e.g., Pin.board.MUX_INH)
+
+
+# Board API --------------------------------------------------------------------
+def get_version():
+    """Return the board version string."""
+    return "V6"
+
+
+# Load switches ---------------------------------------------------------------
+
+_uport_en = None
+_netport_en = None
+
+
+def enable_sensor_power():
+    """Turn on the sensor power rail (PM_EN / UPORT_EN, GPIO21)."""
+    global _uport_en
+    _uport_en = Pin.board.UPORT_EN
+    _uport_en.init(Pin.OUT, value=1)
+
+
+def disable_sensor_power():
+    """Turn off the sensor power rail."""
+    global _uport_en
+    if _uport_en:
+        _uport_en.value(0)
+
+
+def enable_netport_power():
+    """Turn on the NETPORT load switch (GPIO4)."""
+    global _netport_en
+    _netport_en = Pin.board.NETPORT_EN
+    _netport_en.init(Pin.OUT, value=1)
+
+
+def disable_netport_power():
+    """Turn off the NETPORT load switch."""
+    global _netport_en
+    if _netport_en:
+        _netport_en.value(0)
 
 
 # SD Card - SPI mode on slot 2 (VSPI)
@@ -14,7 +54,13 @@ _sd = None
 def mount_sd(mount_point="/sd"):
     """Mount the SD card and return the mount point."""
     global _sd
-    _sd = SDCard(slot=2)
+    _sd = SDCard(
+        slot=2,
+        sck=Pin.board.SDSPI_CLK,
+        mosi=Pin.board.SDSPI_MOSI,
+        miso=Pin.board.SDSPI_MISO,
+        cs=Pin.board.SDSPI_CS,
+    )
     os.mount(os.VfsFat(_sd), mount_point)
     return mount_point
 
@@ -197,19 +243,19 @@ class PortMultiplexer:
         return self._max_ports
 
 
-# UARTPortMux - multiplexed UART sensor ports (up to 8 channels)
+# UARTPortMux - multiplexed UART sensor ports (up to 4 channels)
 class UARTPortMux:
     """
-    Multiplexed UART access for Canarin V5 UPORT channels.
+    Multiplexed UART access for Canarin V6 UPORT channels.
 
-    Uses UART2 (TX=GPIO16, RX=GPIO17) with baudrate=9600.
-    Supports up to 8 sensor ports via 3-bit mux select.
+    Uses UART2 (TX=GPIO48, RX=GPIO47) with baudrate=9600.
+    Supports up to 4 sensor ports via 2-bit mux select.
     """
 
     def __init__(self, uart_id=2, baudrate=9600, timeout_ms=1000, **uart_kwargs):
         self._mux = PortMultiplexer(
             inh_pin=Pin.board.MUX_INH,
-            sel_pins=[Pin.board.UPORT_SEL0, Pin.board.UPORT_SEL1, Pin.board.UPORT_SEL2],
+            sel_pins=[Pin.board.UPORT_SEL0, Pin.board.UPORT_SEL1],
             en_pin=Pin.board.UPORT_EN,
         )
         kwargs = {"timeout": timeout_ms, "tx": Pin.board.UPORT_TX, "rx": Pin.board.UPORT_RX}
@@ -251,50 +297,17 @@ class UARTPortMux:
         return self._mux
 
 
-# ADCPortMux - multiplexed ADC sensor ports (up to 4 channels)
-class ADCPortMux:
-    """Multiplexed ADC access for Canarin V5 ADPORT channels."""
 
-    def __init__(self, atten=ADC.ATTN_11DB):
-        self._mux = PortMultiplexer(
-            inh_pin=Pin.board.MUX_INH,
-            sel_pins=[Pin.board.ADPORT_SEL0, Pin.board.ADPORT_SEL1],
-            en_pin=Pin.board.ADPORT_EN,
-        )
-        self._adc = ADC(Pin.board.ADPORT_SIG)
-        self._adc.atten(atten)
-        self._adc.width(ADC.WIDTH_12BIT)
-
-    def select(self, port):
-        self._mux.select(port)
-        self._mux.enable(True)
-
-    def read(self):
-        return self._adc.read()
-
-    def read_uv(self):
-        return self._adc.read_uv()
-
-    def disable(self):
-        self._mux.enable(False)
-
-    @property
-    def adc(self):
-        return self._adc
-
-    @property
-    def mux(self):
-        return self._mux
-
-
-# ExternalRTC (ISL1219)
+# ExternalRTC (DS3231)
 class ExternalRTC:
-    """External RTC driver for ISL1219 over I2C. Default address: 0x6F."""
+    """External RTC driver for DS3231 over I2C. Default address: 0x68."""
 
-    _REG_RTC_SC = 0x00
-    _HR_MIL     = 0x80
+    _REG_TIME = 0x00
 
-    def __init__(self, i2c, addr=0x6F):
+    RTC_ADDR = 0x68
+    RTC_NAME = "DS3231"
+
+    def __init__(self, i2c, addr=0x68):
         self.i2c = i2c
         self.addr = addr
         if addr not in i2c.scan():
@@ -312,14 +325,17 @@ class ExternalRTC:
         """
         Returns (year, month, day, weekday, hour, minute, second) or None.
         year=4-digit, month=1-12, day=1-31, weekday=1-7, hour=0-23
+
+        DS3231 register layout (7 bytes from 0x00):
+          [0] sec, [1] min, [2] hour, [3] wday, [4] date, [5] month, [6] year
         """
         try:
-            d = self.i2c.readfrom_mem(self.addr, self._REG_RTC_SC, 7)
+            d = self.i2c.readfrom_mem(self.addr, self._REG_TIME, 7)
             return (
-                self._bcd2dec(d[5]) + 2000,
+                self._bcd2dec(d[6]) + 2000,
+                self._bcd2dec(d[5] & 0x1F),
                 self._bcd2dec(d[4]),
-                self._bcd2dec(d[3]),
-                d[6] & 0x07,
+                d[3] & 0x07,
                 self._bcd2dec(d[2] & 0x3F),
                 self._bcd2dec(d[1]),
                 self._bcd2dec(d[0]),
@@ -332,17 +348,20 @@ class ExternalRTC:
         """
         Set RTC time. Returns True on success.
         year (4-digit), month=1-12, day=1-31, weekday=1-7, hour=0-23
+
+        DS3231 register layout (7 bytes from 0x00):
+          [0] sec, [1] min, [2] hour, [3] wday, [4] date, [5] month, [6] year
         """
         try:
             data = bytearray(7)
             data[0] = self._dec2bcd(second)
             data[1] = self._dec2bcd(minute)
-            data[2] = self._dec2bcd(hour) | self._HR_MIL
-            data[3] = self._dec2bcd(day)
-            data[4] = self._dec2bcd(month)
-            data[5] = self._dec2bcd(year - 2000)
-            data[6] = weekday & 0x07
-            self.i2c.writeto_mem(self.addr, self._REG_RTC_SC, data)
+            data[2] = self._dec2bcd(hour)
+            data[3] = weekday & 0x07
+            data[4] = self._dec2bcd(day)
+            data[5] = self._dec2bcd(month)
+            data[6] = self._dec2bcd(year - 2000)
+            self.i2c.writeto_mem(self.addr, self._REG_TIME, data)
             return True
         except Exception as e:
             print("Error writing RTC:", e)
@@ -571,27 +590,27 @@ class ZE07CO(_WinsenSensor):
         return max(0.0, val)
 
 
-# NetPort - UART2 for Ethernet/Cellular modem
+# NetPort - UART for Ethernet/Cellular modem
 class NetPort:
     """
-    Access to NETPORT UART (UART2).
+    Access to NETPORT UART.
 
     Used for cellular modules (e.g., SIM7600) or Ethernet.
-    Pinout: TX=GPIO32, RX=GPIO35, PERST=GPIO13
+    Pinout: TX=GPIO17, RX=GPIO18, EN=GPIO4
     """
 
     def __init__(self, uart_id=1, baudrate=9600, timeout_ms=1000, **uart_kwargs):
-        self._perst = Pin.board.NETPORT_PERST
-        self._perst.init(Pin.OUT, value=1)
+        self._en = Pin.board.NETPORT_EN
+        self._en.init(Pin.OUT, value=0)
         kwargs = {"timeout": timeout_ms, "tx": Pin.board.NETPORT_TX, "rx": Pin.board.NETPORT_RX}
         kwargs.update(uart_kwargs)
         self._uart = UART(uart_id, baudrate=baudrate, **kwargs)
 
     def reset(self, delay_ms=1000):
-        """Reset modem via PERST pin."""
-        self._perst.value(0)
+        """Reset modem via EN pin (disable then re-enable)."""
+        self._en.value(0)
         time.sleep_ms(delay_ms)
-        self._perst.value(1)
+        self._en.value(1)
 
     def read(self, nbytes=None):
         if nbytes:
@@ -616,8 +635,8 @@ class NetPort:
         return self._uart
 
     @property
-    def perst(self):
-        return self._perst
+    def en(self):
+        return self._en
 
 
 # UBloxGPS - u-blox NEO GPS receiver (UART, UBX binary protocol)

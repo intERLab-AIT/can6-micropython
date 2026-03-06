@@ -8,6 +8,32 @@ from machine import Pin, I2C, UART, ADC, SDCard
 # Access via Pin.board.NAME (e.g., Pin.board.MUX_INH)
 
 
+# Board API --------------------------------------------------------------------
+def get_version():
+    """Return the board version string."""
+    return "V5"
+
+
+def enable_sensor_power():
+    """No-op for V5 (no load switch)."""
+    pass
+
+
+def disable_sensor_power():
+    """No-op for V5 (no load switch)."""
+    pass
+
+
+def enable_netport_power():
+    """No-op for V5 (no load switch)."""
+    pass
+
+
+def disable_netport_power():
+    """No-op for V5 (no load switch)."""
+    pass
+
+
 # SD Card - SPI mode on slot 2 (VSPI)
 _sd = None
 
@@ -293,6 +319,9 @@ class ExternalRTC:
 
     _REG_RTC_SC = 0x00
     _HR_MIL     = 0x80
+
+    RTC_ADDR = 0x6F
+    RTC_NAME = "ISL1219"
 
     def __init__(self, i2c, addr=0x6F):
         self.i2c = i2c
