@@ -798,8 +798,14 @@ class UBloxGPS(_MuxUARTSensor):
         _, _, payload = resp
         if len(payload) < 40:
             return None
-        sw = payload[:30].split(b'\x00', 1)[0].decode()
-        hw = payload[30:40].split(b'\x00', 1)[0].decode()
+        try:
+            sw = payload[:30].split(b'\x00', 1)[0].decode()
+        except:
+            sw = "".join(chr(b) for b in payload[:30].split(b'\x00', 1)[0] if b < 128)
+        try:
+            hw = payload[30:40].split(b'\x00', 1)[0].decode()
+        except:
+            hw = "".join(chr(b) for b in payload[30:40].split(b'\x00', 1)[0] if b < 128)
         return {"sw_version": sw, "hw_version": hw}
 
     def read(self, timeout_ms=1500):

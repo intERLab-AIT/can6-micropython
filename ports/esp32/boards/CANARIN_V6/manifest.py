@@ -12,4 +12,4 @@ require("aioble")
 module("canarin.py", base_path="$(BOARD_DIR)")
 
 # Uncomment the following to freeze main.py
-#module("main.py", base_path="$(BOARD_DIR)")
+module("main.py", base_path="$(BOARD_DIR)")

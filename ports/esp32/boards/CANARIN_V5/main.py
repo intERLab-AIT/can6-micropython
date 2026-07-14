@@ -8,6 +8,7 @@ from machine import I2C
 from canarin import (
     BME280, ExternalRTC,
     UARTPortMux, PMS7003, MHZ16, ZE07CO, UBloxGPS,
+    NetPort,
     mount_sd, umount_sd,
     get_version,
     enable_sensor_power, disable_sensor_power,
@@ -15,7 +16,7 @@ from canarin import (
 )
 
 # -- Configuration -----------------------------------------------------------
-WIFI_SSID = "Canarin"
+WIFI_SSID = "Hazemon"
 WIFI_PASS = "interlab"
 WIFI_TIMEOUT_S = 10
 
@@ -30,16 +31,18 @@ if BOARD_VERSION == "V5":
     UPORT_ZE07CO = 7
     HAS_MHZ16 = True
     HAS_ZE07CO = True
+    HAS_GPS = True
     LOG_PREFIX = "CAN5_MFG_"
     POWER_CONTROL = False
 elif BOARD_VERSION == "V6":
     BOARD_NAME = "CANARIN V6"
     UPORT_PMS7003 = 0
     UPORT_MHZ16 = None
-    UPORT_GPS = 2
+    UPORT_GPS = None
     UPORT_ZE07CO = None
     HAS_MHZ16 = False
     HAS_ZE07CO = False
+    HAS_GPS = False
     LOG_PREFIX = "CAN6_MFG_"
     POWER_CONTROL = True
 else:
@@ -50,7 +53,14 @@ RTC_ADDR = ExternalRTC.RTC_ADDR
 RTC_NAME = ExternalRTC.RTC_NAME
 
 MOUNT_POINT = "/sd"
-LOG_FILE = MOUNT_POINT + "/mfg_test_log.txt"
+
+if BOARD_VERSION == "V5":
+    LOG_FILE = MOUNT_POINT + "/mfg_test_log_v5.txt"
+elif BOARD_VERSION == "V6":
+    LOG_FILE = MOUNT_POINT + "/mfg_test_log_v6.txt"
+else:
+    raise ValueError("Unknown board version: {}".format(BOARD_VERSION))
+
 MAX_RETRIES = 5
 W = 50
 
@@ -202,12 +212,21 @@ def test_rtc(i2c):
         _result("RTC", RTC_NAME, False, str(e))
         return
 
+
     yr, mo, dy, wd, hr, mn, sc = 2025, 1, 15, 4, 12, 30, 0
     try:
         rtc.set_time(yr, mo, dy, wd, hr, mn, sc)
     except Exception as e:
         _result("RTC", RTC_NAME, False, "set: " + str(e))
         return
+
+    # set time 
+    status = i2c.readfrom_mem(111, 0x07, 1)[0] #############################
+    i2c.writeto_mem(111, 0x07, bytes([status | 0x10]))
+    i2c.writeto_mem(111, 0x00, bytes([0x50, 0x34, 0x92, 0x01, 0x01, 0x24]))
+    raw_time = i2c.readfrom_mem(111, 0x00, 6)
+    print([hex(x) for x in raw_time])
+    # end
 
     time.sleep_ms(100)
     t = rtc.get_time()
@@ -290,16 +309,47 @@ def test_sensors(i2c):
             _result("SENSOR", "ZE07CO", False, str(e))
 
     # GPS — skip configure to avoid long blocking waits when absent
-    try:
-        gps = UBloxGPS(umux, port=UPORT_GPS, configure=False)
-        _retry(
-            "SENSOR", "GPS", gps.detect,
-            fmt_fn=lambda v: "SW={} HW={}".format(v["sw_version"], v["hw_version"]),
-        )
-    except Exception as e:
-        _result("SENSOR", "GPS", False, str(e))
+    if HAS_GPS and UPORT_GPS is not None:
+        try:
+            gps = UBloxGPS(umux, port=UPORT_GPS, configure=False)
+            _retry(
+                "SENSOR", "GPS", gps.detect,
+                fmt_fn=lambda v: "SW={} HW={}".format(v["sw_version"], v["hw_version"]),
+            )
+        except Exception as e:
+            _result("SENSOR", "GPS", False, str(e))
 
     umux.disable()
+
+
+def test_netport(np, boot_deadline):
+    try:
+        if np is None:
+            _result("NETPORT", "AT", False, "not initialized")
+            return
+
+        # Wait for remaining boot time if any
+        wait_ms = time.ticks_diff(boot_deadline, time.ticks_ms())
+        if wait_ms > 0:
+            _info("Waiting for modem boot ({}ms remaining)...".format(wait_ms))
+            time.sleep_ms(wait_ms)
+
+        np.read()  # Clear any boot messages
+        for _ in range(5):
+            np.write(b"AT+CGMR\r\n")
+            time.sleep_ms(1000)
+            if np.any():
+                chunk = np.read()
+                try:
+                    res = chunk.decode()
+                except:
+                    res = "".join(chr(b) for b in chunk if b < 128)
+                if "OK" in res:
+                    _result("NETPORT", "Cellular", True, res.replace('\n', ' ').replace('\r', ''))
+                    return
+        _result("NETPORT", "AT", False, "timeout")
+    except Exception as e:
+        _result("NETPORT", "AT", False, str(e))
 
 
 def save_log(lines):
@@ -346,6 +396,16 @@ def main():
         enable_netport_power()
         time.sleep(1)
 
+    # Start NetPort boot early to save time
+    np = None
+    boot_deadline = time.ticks_ms()
+    try:
+        np = NetPort(baudrate=115200, timeout_ms=1000)
+        np.reset(delay_ms=500)
+        boot_deadline = time.ticks_add(time.ticks_ms(), 15000)
+    except Exception as e:
+        _info("NetPort init failed: " + str(e))
+
     i2c = I2C(0)
 
     test_i2c(i2c)
@@ -353,6 +413,7 @@ def main():
     test_wifi()
     test_rtc(i2c)
     test_sensors(i2c)
+    test_netport(np, boot_deadline)
     print_summary()
     save_log(_log_lines)
 

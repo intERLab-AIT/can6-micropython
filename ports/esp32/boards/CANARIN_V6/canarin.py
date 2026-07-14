@@ -16,36 +16,36 @@ def get_version():
 
 # Load switches ---------------------------------------------------------------
 
-_uport_en = None
-_netport_en = None
+_sens_pwr_en = None
+_net_pwr_en = None
 
 
 def enable_sensor_power():
     """Turn on the sensor power rail (PM_EN / UPORT_EN, GPIO21)."""
-    global _uport_en
-    _uport_en = Pin.board.UPORT_EN
-    _uport_en.init(Pin.OUT, value=1)
+    global _sens_pwr_en
+    _sens_pwr_en = Pin.board.SENS_PWR_EN
+    _sens_pwr_en.init(Pin.OUT, value=1)
 
 
 def disable_sensor_power():
     """Turn off the sensor power rail."""
-    global _uport_en
-    if _uport_en:
-        _uport_en.value(0)
+    global _sens_pwr_en
+    if _sens_pwr_en:
+        _sens_pwr_en.value(0)
 
 
 def enable_netport_power():
     """Turn on the NETPORT load switch (GPIO4)."""
-    global _netport_en
-    _netport_en = Pin.board.NETPORT_EN
-    _netport_en.init(Pin.OUT, value=1)
+    global _net_pwr_en
+    _net_pwr_en = Pin.board.NET_PWR_EN
+    _net_pwr_en.init(Pin.OUT, value=1)
 
 
 def disable_netport_power():
     """Turn off the NETPORT load switch."""
-    global _netport_en
-    if _netport_en:
-        _netport_en.value(0)
+    global _net_pwr_en
+    if _net_pwr_en:
+        _net_pwr_en.value(0)
 
 
 # SD Card - SPI mode on slot 2 (VSPI)
@@ -600,7 +600,7 @@ class NetPort:
     """
 
     def __init__(self, uart_id=1, baudrate=9600, timeout_ms=1000, **uart_kwargs):
-        self._en = Pin.board.NETPORT_EN
+        self._en = Pin.board.NETPORT_PERST
         self._en.init(Pin.OUT, value=0)
         kwargs = {"timeout": timeout_ms, "tx": Pin.board.NETPORT_TX, "rx": Pin.board.NETPORT_RX}
         kwargs.update(uart_kwargs)
@@ -788,8 +788,14 @@ class UBloxGPS(_MuxUARTSensor):
         _, _, payload = resp
         if len(payload) < 40:
             return None
-        sw = payload[:30].split(b'\x00', 1)[0].decode()
-        hw = payload[30:40].split(b'\x00', 1)[0].decode()
+        try:
+            sw = payload[:30].split(b'\x00', 1)[0].decode()
+        except:
+            sw = "".join(chr(b) for b in payload[:30].split(b'\x00', 1)[0] if b < 128)
+        try:
+            hw = payload[30:40].split(b'\x00', 1)[0].decode()
+        except:
+            hw = "".join(chr(b) for b in payload[30:40].split(b'\x00', 1)[0] if b < 128)
         return {"sw_version": sw, "hw_version": hw}
 
     def read(self, timeout_ms=1500):
