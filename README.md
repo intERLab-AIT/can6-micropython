@@ -1,20 +1,55 @@
 # Canarin Board Ports Reference Manual (V5 & V6)
 
-Welcome to the technical reference manual and developer documentation for the custom MicroPython board ports designed for the **Canarin** environmental monitoring devices. This guide is written to help application developers write micro-python application for the Hazemon sensor nodes running on ESP32 (V5) and ESP32-S3 (V6) hardware.
+Welcome to the technical reference manual and developer documentation for the custom MicroPython board ports designed for the **Canarin** environmental monitoring devices! This guide is written to help you write MicroPython applications for the Hazemon sensor nodes running on ESP32 (V5) and ESP32-S3 (V6) hardware.
 
 ## 1. Getting Started
 
-Micropython with all its features have been ported to Canarin5/Canarin6 and the port can be found in [CANARIN_V5](ports/esp32/boards/CANARIN_V5) and [CANARIN_V6](ports/esp32/boards/CANARIN_V6). A helper library, `canarin` is implemented for both platforms which is aimed to help developers develop application in these platforms. 
+MicroPython, with all its features, has been ported to Canarin5 and Canarin6. You can find the port in [CANARIN_V5](ports/esp32/boards/CANARIN_V5) and [CANARIN_V6](ports/esp32/boards/CANARIN_V6). A helper library called `canarin` is included for both platforms to help you develop applications quickly. 
 
-The boards have been added following this guide [README.md](ports/esp32/README.md).
+The boards have been added following the standard ESP32 port guide located in [README.md](ports/esp32/README.md).
 
+The `canarin` module is frozen directly into the MicroPython firmware for both boards. It wraps hardware-level details, such as multiplexer switching timings, BCD conversion registers for the clocks, load switch gating, and packet parsing, into clean and Pythonic classes.
 
-The `canarin` module is frozen directly into the MicroPython firmware for both boards. It wraps hardware-level details—such as multiplexer switching timings, BCD conversion registers for the clocks, load switch gating, and packet parsing—into clean, Pythonic classes.
-
-To start writing an application, import the module at the top of your script:
+To start writing an application, just import the module at the top of your script:
 ```python
 import canarin
 ```
+
+### Building the Firmware
+
+To build the custom firmware for Canarin boards, we provide two helper scripts in the `ports/esp32` directory:
+*   `make_can5_bin.sh`: Builds the firmware for the Canarin V5 board (ESP32) and merges the bootloader, partition table, and MicroPython binary into a single file `build-CANARIN_V5/can5-test.bin`.
+*   `make_can6_bin.sh`: Builds the firmware for the Canarin V6 board (ESP32-S3) and merges the components into a single file `build-CANARIN_V6/can6-test.bin`.
+
+**Important Note:** Before running the build scripts, make sure you have activated your ESP-IDF 5 environment!
+
+You can execute these scripts directly from the `ports/esp32` directory:
+```bash
+cd ports/esp32
+# Ensure you run the ESP-IDF export.sh script first!
+. /path/to/esp-idf/export.sh
+
+./make_can5_bin.sh  # Build for Canarin V5
+./make_can6_bin.sh  # Build for Canarin V6
+```
+
+### Freezing Modules with `manifest.py`
+If you want to freeze your own custom Python modules into the firmware to save RAM, you can modify the `manifest.py` file located in the board's directory. Freezing compiles the Python code into bytecode and bakes it into the flash memory, leaving more RAM available for your application.
+
+### Application Development and Thonny
+
+By default, the firmware includes a test application located at `ports/esp32/boards/CANARIN_V5/main.py` (or `CANARIN_V6/main.py`) which is frozen into the firmware and runs automatically on boot. 
+
+**Removing the default test or adding a custom application:**
+*   **To remove the default test:** Simply delete or rename `main.py` from the board's directory (`ports/esp32/boards/CANARIN_V5/main.py` or `CANARIN_V6/main.py`) before building the firmware. You may also need to check the `manifest.py` if it explicitly includes `main.py`.
+*   **To add a custom application during build:** Place your custom `.py` files in the board directory (replacing `main.py`) before running the build scripts. These files will be compiled and frozen into the firmware.
+
+**Developing with Thonny:**
+For a rapid development cycle without rebuilding firmware, we recommend using the [Thonny IDE](https://thonny.org/):
+1.  Flash the Canarin firmware onto your board using `esptool.py` (the exact command is printed when the build scripts finish).
+2.  Open Thonny, go to **Tools > Options > Interpreter**.
+3.  Select **MicroPython (ESP32)** as the interpreter and choose the correct COM port for your board.
+4.  You can now use the REPL, upload files directly to the device's internal filesystem (like a custom `main.py` to override the frozen one), and run scripts interactively. Note that a `main.py` placed on the device's filesystem will take precedence over a frozen `main.py`.
 
 ---
 
@@ -36,7 +71,7 @@ import canarin
 
 ## 3. Pinout Reference Cheat Sheet
 
-These mappings are registered in the board-specific [pins.csv](ports/esp32/boards/CANARIN_V5/pins.csv) and [pins.csv](ports/esp32/boards/CANARIN_V6/pins.csv) configurations. Access them programmatically using `machine.Pin.board.PIN_NAME`.
+These mappings are registered in the board-specific [pins.csv](ports/esp32/boards/CANARIN_V5/pins.csv) and [pins.csv](ports/esp32/boards/CANARIN_V6/pins.csv) configurations. You can access them programmatically using `machine.Pin.board.PIN_NAME`.
 
 ```
 Canarin V5 (ESP32)                          Canarin V6 (ESP32-S3)
@@ -51,13 +86,12 @@ Canarin V5 (ESP32)                          Canarin V6 (ESP32-S3)
 │   INH=12              │                  │   TX=48, RX=47        │
 │   TX=16, RX=17        │                  │                       │
 │                       │                  │ Power Control:        │
-│ ADC Mux:              │                  │   Sensors = GPIO21    │
+│ ADC Mux:              │                  │   Sensors = GPIO5     │
 │   SEL0=25, SEL1=26    │                  │   Modem = GPIO4       │
 │   SIG=33, EN=14       │                  │                       │
-│                       │                  │ Net Port:             │
-│ Net Port:             │                  │   TX=17, RX=18        │
-│   TX=32, RX=35        │                  │   EN=4                │
-│   Reset=13            │                  │                       │
+│ Net Port:             │                  │ Net Port:             │
+│   TX=32, RX=35        │                  │   TX=17, RX=18        │
+│   Reset=13            │                  │   Reset=38            │
 └───────────────────────┘                  └───────────────────────┘
 ```
 
@@ -66,7 +100,7 @@ Canarin V5 (ESP32)                          Canarin V6 (ESP32-S3)
 ## 4. Core System & Power Control APIs
 
 ### 4.1. Reading Board Information
-Retrieve the board version programmatically to load version-specific features (e.g. sensor channel mapping).
+Retrieve the board version programmatically to load version-specific features, like sensor channel mapping.
 ```python
 import canarin
 
@@ -76,7 +110,7 @@ print(f"Running on Canarin Hardware Version: {version}")
 ```
 
 ### 4.2. Power Gating (V6 Load Switches)
-To conserve battery charge, Canarin V6 allows you to cut power completely to the UART sensor rail and the cellular modem/Ethernet slot when not actively taking measurements. On Canarin V5, these calls are safe no-ops.
+To conserve battery charge, Canarin V6 allows you to cut power completely to the UART sensor rail and the cellular modem or Ethernet slot when not actively taking measurements. On Canarin V5, these calls are safe no-ops.
 
 ```python
 import time
@@ -337,22 +371,9 @@ modem.flush_rx()
 
 ---
 
-## 9. Legacy C Firmware Files Note
+## 9. MicroPython API Reference
 
-The following files located under the V6 port folder:
-- [can5_pins.h](ports/esp32/boards/CANARIN_V6/can5_pins.h)
-- [can5_wiring.h](ports/esp32/boards/CANARIN_V6/can5_wiring.h)
-- [can5_hal.c](ports/esp32/boards/CANARIN_V6/can5_hal.c)
-- [can5_rtc.c](ports/esp32/boards/CANARIN_V6/can5_rtc.c)
-- [can5_config_types.c](ports/esp32/boards/CANARIN_V6/can5_config_types.c)
-
-These files belong to the earlier native ESP-IDF C-based firmware architecture of the Canarin V5 board. **They are not compiled** in the MicroPython build process. They are preserved in the port directory to serve as a design documentation and hardware mapping reference for developers translating board updates into the frozen Python drivers.
-
----
-
-## 10. MicroPython API Reference
-
-### 10.1. Driver Class Diagram
+### 9.1. Driver Class Diagram
 
 The UML class diagram below outlines the inheritance hierarchy, interface dependencies, and composition associations within the frozen `canarin` module:
 
@@ -469,178 +490,178 @@ classDiagram
 
 ---
 
-### 10.2. Board Information and Power Management
+### 9.2. Board Information and Power Management
 
 #### `get_version()`
-- **Returns**: `str` — `"V5"` or `"V6"` depending on the firmware/board configuration.
+*   **Returns**: `str` (`"V5"` or `"V6"`) depending on the firmware and board configuration.
 
 #### `enable_sensor_power()` / `disable_sensor_power()`
-- Enablers or disablers of power routing to the UPORT sensor rail.
-- **Behavior**:
-  - **V5**: No-op (the sensor rail is hard-wired/always-on).
-  - **V6**: Drives `UPORT_EN` (GPIO21) high (`1`) to power up, and low (`0`) to sleep.
+*   Enablers or disablers of power routing to the UPORT sensor rail.
+*   **Behavior**:
+    *   **V5**: No-op (the sensor rail is hard-wired and always-on).
+    *   **V6**: Drives `UPORT_EN` (GPIO5) high (`1`) to power up, and low (`0`) to sleep.
 
 #### `enable_netport_power()` / `disable_netport_power()`
-- Enablers or disablers of power routing to the NETPORT slot (modem / Ethernet adapter).
-- **Behavior**:
-  - **V5**: No-op.
-  - **V6**: Drives `NETPORT_EN` (GPIO4) high (`1`) to supply power, and low (`0`) to cut power.
+*   Enablers or disablers of power routing to the NETPORT slot (modem or Ethernet adapter).
+*   **Behavior**:
+    *   **V5**: No-op.
+    *   **V6**: Drives `NETPORT_EN` (GPIO4) high (`1`) to supply power, and low (`0`) to cut power.
 
 ---
 
-### 10.3. Storage Management
+### 9.3. Storage Management
 
 #### `mount_sd(mount_point="/sd")`
-- Mounts the MicroSD card (FAT filesystem format) onto the specified directory path.
-- **Parameters**: `mount_point` (`str`, default: `"/sd"`).
-- **Returns**: `str` — The absolute path of the mount point.
+*   Mounts the MicroSD card (FAT filesystem format) onto the specified directory path.
+*   **Parameters**: `mount_point` (`str`, default: `"/sd"`).
+*   **Returns**: `str` (The absolute path of the mount point).
 
 #### `umount_sd(mount_point="/sd")`
-- Safely unmounts and closes the MicroSD filesystem and card interface.
-- **Parameters**: `mount_point` (`str`, default: `"/sd"`).
+*   Safely unmounts and closes the MicroSD filesystem and card interface.
+*   **Parameters**: `mount_point` (`str`, default: `"/sd"`).
 
 ---
 
-### 10.4. Multiplexer Controller APIs
+### 9.4. Multiplexer Controller APIs
 
 #### `class PortMultiplexer(inh_pin, sel_pins, en_pin=None)`
 Low-level controller for the analog and digital multiplexers.
-- **Methods**:
-  - `select(port)`: Switches the active channel selection. Pulls `MUX_INH` high (inhibiting routing) during transitions, sets selection pins to the binary index of `port`, and drives `MUX_INH` low after a brief delay.
-  - `enable(state=True)`: Drives the `en_pin` (if present) to enable or disable the multiplexer chip.
-  - `disable()`: Equivalent to `enable(False)`.
-- **Properties**:
-  - `selected` (`int`): Returns the currently selected port index.
-  - `max_ports` (`int`): Returns the maximum supported channels (derived from \(2^{\text{len(sel\_pins)}}\)).
+*   **Methods**:
+    *   `select(port)`: Switches the active channel selection. Pulls `MUX_INH` high (inhibiting routing) during transitions, sets selection pins to the binary index of `port`, and drives `MUX_INH` low after a brief delay.
+    *   `enable(state=True)`: Drives the `en_pin` (if present) to enable or disable the multiplexer chip.
+    *   `disable()`: Equivalent to `enable(False)`.
+*   **Properties**:
+    *   `selected` (`int`): Returns the currently selected port index.
+    *   `max_ports` (`int`): Returns the maximum supported channels (derived from 2 to the power of `len(sel_pins)`).
 
 #### `class UARTPortMux(uart_id=2, baudrate=9600, timeout_ms=1000, **uart_kwargs)`
 High-level wrapper interfacing a hardware `machine.UART` instance with the `PortMultiplexer`.
-- **Methods**:
-  - `select(port)`: Switches the multiplexer routing to target a specific hardware channel.
-  - `read(nbytes=None)`: Read bytes from the UART buffer.
-  - `readline()`: Reads a line ending with a newline character.
-  - `write(data)`: Writes raw byte data to the port.
-  - `any()`: Returns the number of bytes available in the UART buffer.
-  - `flush_rx()`: Flushes all incoming data from the receive buffers.
-  - `disable()`: Disables the multiplexer control line.
-- **Properties**:
-  - `uart` (`machine.UART`): Returns the raw UART peripheral instance.
-  - `mux` (`PortMultiplexer`): Returns the underlying `PortMultiplexer` instance.
+*   **Methods**:
+    *   `select(port)`: Switches the multiplexer routing to target a specific hardware channel.
+    *   `read(nbytes=None)`: Read bytes from the UART buffer.
+    *   `readline()`: Reads a line ending with a newline character.
+    *   `write(data)`: Writes raw byte data to the port.
+    *   `any()`: Returns the number of bytes available in the UART buffer.
+    *   `flush_rx()`: Flushes all incoming data from the receive buffers.
+    *   `disable()`: Disables the multiplexer control line.
+*   **Properties**:
+    *   `uart` (`machine.UART`): Returns the raw UART peripheral instance.
+    *   `mux` (`PortMultiplexer`): Returns the underlying `PortMultiplexer` instance.
 
 #### `class ADCPortMux(atten=ADC.ATTN_11DB)` *(V5 Only)*
 High-level wrapper interfacing a hardware `machine.ADC` instance with the 4-channel analog multiplexer.
-- **Methods**:
-  - `select(port)`: Routes the ADC input to a target channel (0 to 3).
-  - `read()`: Returns the raw 12-bit digital reading (0–4095).
-  - `read_uv()`: Returns the calibrated voltage value in microvolts.
-  - `disable()`: Disables the analog mux select lines.
+*   **Methods**:
+    *   `select(port)`: Routes the ADC input to a target channel (0 to 3).
+    *   `read()`: Returns the raw 12-bit digital reading (0 to 4095).
+    *   `read_uv()`: Returns the calibrated voltage value in microvolts.
+    *   `disable()`: Disables the analog mux select lines.
 
 ---
 
-### 10.5. Environmental and Gas Sensors
+### 9.5. Environmental and Gas Sensors
 
 #### `class BME280(i2c, addr=0x76)`
 Driver for the Bosch BME280 temperature, pressure, and humidity sensor over I2C.
-- **Methods**:
-  - `read()`: Returns a tuple `(temp_C, pres_hPa, humi_pct)` representing temperature in Celsius, barometric pressure in hectopascals, and relative humidity in percentage.
+*   **Methods**:
+    *   `read()`: Returns a tuple `(temp_C, pres_hPa, humi_pct)` representing temperature in Celsius, barometric pressure in hectopascals, and relative humidity in percentage.
 
 #### `class PMS7003(uart_or_mux, port=None)`
 Driver for the Plantower PMS7003 Particulate Matter sensor.
-- **Methods**:
-  - `read(timeout_ms=2000)`: Requests and reads a particulate matter data frame.
-  - **Returns**: `dict` on success (or `None` on timeout/checksum mismatch):
-    ```python
-    {
-        "pm1_0_cf1": int,   # PM1.0 CF=1 standard particle (ug/m3)
-        "pm2_5_cf1": int,   # PM2.5 CF=1 standard particle (ug/m3)
-        "pm10_cf1":  int,   # PM10  CF=1 standard particle (ug/m3)
-        "pm1_0_atm": int,   # PM1.0 under atmospheric environment
-        "pm2_5_atm": int,   # PM2.5 under atmospheric environment
-        "pm10_atm":  int    # PM10  under atmospheric environment
-    }
-    ```
+*   **Methods**:
+    *   `read(timeout_ms=2000)`: Requests and reads a particulate matter data frame.
+    *   **Returns**: `dict` on success (or `None` on timeout or checksum mismatch):
+        ```python
+        {
+            "pm1_0_cf1": int,   # PM1.0 CF=1 standard particle (ug/m3)
+            "pm2_5_cf1": int,   # PM2.5 CF=1 standard particle (ug/m3)
+            "pm10_cf1":  int,   # PM10  CF=1 standard particle (ug/m3)
+            "pm1_0_atm": int,   # PM1.0 under atmospheric environment
+            "pm2_5_atm": int,   # PM2.5 under atmospheric environment
+            "pm10_atm":  int    # PM10  under atmospheric environment
+        }
+        ```
 
 #### `class MHZ16(uart_or_mux, port=None)`
 Driver for the Winsen MH-Z16 NDIR CO2 sensor.
-- **Methods**:
-  - `read(timeout_ms=1000)`: Sends a request frame and parses the return data.
-  - **Returns**: `int` (CO2 concentration in ppm) or `None` on error.
+*   **Methods**:
+    *   `read(timeout_ms=1000)`: Sends a request frame and parses the return data.
+    *   **Returns**: `int` (CO2 concentration in ppm) or `None` on error.
 
 #### `class ZE07CO(uart_or_mux, port=None, bias=0.0)`
 Driver for the Winsen ZE07-CO electrochemical Carbon Monoxide sensor.
-- **Methods**:
-  - `read(timeout_ms=1000)`: Sends a request frame, parses the return data, and offsets it by the calibration bias.
-  - **Returns**: `float` (CO concentration in ppm) or `None` on error.
+*   **Methods**:
+    *   `read(timeout_ms=1000)`: Sends a request frame, parses the return data, and offsets it by the calibration bias.
+    *   **Returns**: `float` (CO concentration in ppm) or `None` on error.
 
 ---
 
-### 10.6. Networking and Location Services
+### 9.6. Networking and Location Services
 
 #### `class NetPort(uart_id=1, baudrate=9600, timeout_ms=1000, **uart_kwargs)`
-API to control communication and hardware state of the cellular modem/Ethernet slot.
-- **Methods**:
-  - `reset(delay_ms=1000)`: Performs a hardware reset cycle by toggling the control pin.
-  - `read(nbytes=None)` / `readline()` / `write(data)` / `any()`: standard serial wrapper functions.
-  - `flush_rx()`: Flushes incoming read buffers.
+API to control communication and hardware state of the cellular modem or Ethernet slot.
+*   **Methods**:
+    *   `reset(delay_ms=1000)`: Performs a hardware reset cycle by toggling the control pin.
+    *   `read(nbytes=None)` / `readline()` / `write(data)` / `any()`: standard serial wrapper functions.
+    *   `flush_rx()`: Flushes incoming read buffers.
 
 #### `class UBloxGPS(uart_or_mux, port=None, configure=True, power_save=False)`
 Driver for u-blox NEO GPS receivers communicating over UBX binary protocol.
-- **Methods**:
-  - `detect()`: Polls the GPS hardware information. Returns a `dict` (e.g. `{"sw_version": str, "hw_version": str}`) or `None`.
-  - `read(timeout_ms=1500)`: Polls the device using `NAV-PVT` payloads.
-  - **Returns**: `dict` on success (or `None` on error):
-    ```python
-    {
-        "lat": float,         # Latitude (decimal degrees)
-        "lon": float,         # Longitude (decimal degrees)
-        "alt": float,         # Altitude above MSL (meters)
-        "n_sat": int,         # Number of tracked satellites
-        "fix_type": int,      # Fix type (0: No Fix, 2: 2D, 3: 3D, etc.)
-        "fix": bool,          # True if fully resolved 3D fix
-        "vel_north": float,   # Velocity North (m/s)
-        "vel_east": float,    # Velocity East (m/s)
-        "vel_down": float,    # Velocity Down (m/s)
-        "year": int,          # GPS resolved year (Optional, based on validity flags)
-        "month": int,         # GPS resolved month (Optional)
-        "day": int,           # GPS resolved day (Optional)
-        "hour": int,          # GPS resolved hour (Optional)
-        "min": int,           # GPS resolved minute (Optional)
-        "sec": int            # GPS resolved second (Optional)
-    }
-    ```
+*   **Methods**:
+    *   `detect()`: Polls the GPS hardware information. Returns a `dict` (e.g. `{"sw_version": str, "hw_version": str}`) or `None`.
+    *   `read(timeout_ms=1500)`: Polls the device using `NAV-PVT` payloads.
+    *   **Returns**: `dict` on success (or `None` on error):
+        ```python
+        {
+            "lat": float,         # Latitude (decimal degrees)
+            "lon": float,         # Longitude (decimal degrees)
+            "alt": float,         # Altitude above MSL (meters)
+            "n_sat": int,         # Number of tracked satellites
+            "fix_type": int,      # Fix type (0: No Fix, 2: 2D, 3: 3D, etc.)
+            "fix": bool,          # True if fully resolved 3D fix
+            "vel_north": float,   # Velocity North (m/s)
+            "vel_east": float,    # Velocity East (m/s)
+            "vel_down": float,    # Velocity Down (m/s)
+            "year": int,          # GPS resolved year (Optional, based on validity flags)
+            "month": int,         # GPS resolved month (Optional)
+            "day": int,           # GPS resolved day (Optional)
+            "hour": int,          # GPS resolved hour (Optional)
+            "min": int,           # GPS resolved minute (Optional)
+            "sec": int            # GPS resolved second (Optional)
+        }
+        ```
 
 ---
 
-### 10.7. Time Management
+### 9.7. Time Management
 
 #### `class ExternalRTC(i2c, addr)`
 Interfacing with the on-board external Real-Time Clock module (ISL1219 or DS3231).
-- **Methods**:
-  - `get_time()`: Retrieves the current time from the RTC.
-    - **Returns**: `tuple` — `(year, month, day, weekday, hour, minute, second)` or `None` on bus read error.
-  - `set_time(year, month, day, weekday, hour, minute, second)`: Write configuration values to the RTC registers.
-    - **Returns**: `bool` — `True` on successful write, `False` otherwise.
+*   **Methods**:
+    *   `get_time()`: Retrieves the current time from the RTC.
+        *   **Returns**: `tuple` `(year, month, day, weekday, hour, minute, second)` or `None` on bus read error.
+    *   `set_time(year, month, day, weekday, hour, minute, second)`: Write configuration values to the RTC registers.
+        *   **Returns**: `bool` `True` on successful write, `False` otherwise.
 
 ---
 
-## 11. Manufacturing Test (`main.py`)
+## 10. Manufacturing Test (`main.py`)
 
 The [main.py](ports/esp32/boards/CANARIN_V5/main.py) script serves as the manufacturing test procedure and is run after flashing to verify assembly.
 
 It performs testing in the following order:
-1. **Power Initialization**: Enables load switches (V6 only).
-2. **I2C Bus Scan**: Checks for devices attached to the I2C0 bus.
-3. **SD Card Test**: Mounts the SD Card fat FS, writes a unique prefix test string, reads it back, checks for mismatch, deletes the test file, and unmounts.
-4. **WiFi scan & connect**: Powers on Wi-Fi, scans for networks, connects to the `"Canarin"` SSID, and tests connection stability.
-5. **RTC set/get/tick**: Configures the external RTC to a reference time, sleeps for 5 seconds, verifies that time advances correctly, and checks accuracy.
-6. **BME280 sensor read**: Checks that reading falls within realistic ranges:
-   - Temp: \(-40^\circ\text{C}\) to \(85^\circ\text{C}\)
-   - Pressure: \(300\text{ hPa}\) to \(1100\text{ hPa}\)
-   - Humidity: \(0\%\) to \(100\%\)
-7. **UART Multiplexed Sensors**:
-   - Routes to the PM sensor port and verifies active readings.
-   - Routes to other configured multiplexer ports to verify communication.
-8. **Logging**: Saves test results as a text log on the SD card: `mfg_test_log.txt`.
+1.  **Power Initialization**: Enables load switches (V6 only).
+2.  **I2C Bus Scan**: Checks for devices attached to the I2C0 bus.
+3.  **SD Card Test**: Mounts the SD Card fat FS, writes a unique prefix test string, reads it back, checks for mismatch, deletes the test file, and unmounts.
+4.  **WiFi scan & connect**: Powers on Wi-Fi, scans for networks, connects to the `"Canarin"` SSID, and tests connection stability.
+5.  **RTC set/get/tick**: Configures the external RTC to a reference time, sleeps for 5 seconds, verifies that time advances correctly, and checks accuracy.
+6.  **BME280 sensor read**: Checks that reading falls within realistic ranges:
+    *   Temp: -40°C to 85°C
+    *   Pressure: 300 hPa to 1100 hPa
+    *   Humidity: 0% to 100%
+7.  **UART Multiplexed Sensors**:
+    *   Routes to the PM sensor port and verifies active readings.
+    *   Routes to other configured multiplexer ports to verify communication.
+8.  **Logging**: Saves test results as a text log on the SD card: `mfg_test_log.txt`.
 
 ### Sensor Routing Configurations
 
