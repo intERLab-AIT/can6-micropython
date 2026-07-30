@@ -6,7 +6,7 @@ Welcome to the technical reference manual and developer documentation for the cu
 
 MicroPython, with all its features, has been ported to Canarin5 and Canarin6. You can find the port in [CANARIN_V5](ports/esp32/boards/CANARIN_V5) and [CANARIN_V6](ports/esp32/boards/CANARIN_V6). A helper library called `canarin` is included for both platforms to help you develop applications quickly. 
 
-The boards have been added following the standard ESP32 port guide located in [README.md](ports/esp32/README.md).
+The boards have been added following the standard ESP32 port guide located in [MicroPython port to the ESP32](ports/esp32/README.md). Please read this document to understand how to setup the repo for port based builds.
 
 The `canarin` module is frozen directly into the MicroPython firmware for both boards. It wraps hardware-level details, such as multiplexer switching timings, BCD conversion registers for the clocks, load switch gating, and packet parsing, into clean and Pythonic classes.
 
@@ -15,9 +15,11 @@ To start writing an application, just import the module at the top of your scrip
 import canarin
 ```
 
+[ports/esp32/boards/CANARIN_V5/main.py](ports/esp32/boards/CANARIN_V5/main.py) and [ports/esp32/boards/CANARIN_V5/main.py](ports/esp32/boards/CANARIN_V5/main.py) would be a good place to start to modify manufacturing tests as well as learn to develop new micro-python application on top of this firmware.
+
 ### Building the Firmware
 
-To build the custom firmware for Canarin boards, we provide two helper scripts in the `ports/esp32` directory:
+To build the custom firmware for Canarin boards, two helper scripts are provided in the `ports/esp32` directory:
 *   `make_can5_bin.sh`: Builds the firmware for the Canarin V5 board (ESP32) and merges the bootloader, partition table, and MicroPython binary into a single file `build-CANARIN_V5/can5-test.bin`.
 *   `make_can6_bin.sh`: Builds the firmware for the Canarin V6 board (ESP32-S3) and merges the components into a single file `build-CANARIN_V6/can6-test.bin`.
 
@@ -33,6 +35,8 @@ cd ports/esp32
 ./make_can6_bin.sh  # Build for Canarin V6
 ```
 
+**Changing source code in any file which is frozen in the firmware require a complete rebuilt.** Please deleted the corrosponding `build-CANARIN_V6` or `build-CANARIN_v5` directory. Then proceed with `./make_can5_bin.sh` or `./make_can6_bin.sh`. 
+
 ### Freezing Modules with `manifest.py`
 If you want to freeze your own custom Python modules into the firmware to save RAM, you can modify the `manifest.py` file located in the board's directory. Freezing compiles the Python code into bytecode and bakes it into the flash memory, leaving more RAM available for your application.
 
@@ -41,8 +45,8 @@ If you want to freeze your own custom Python modules into the firmware to save R
 By default, the firmware includes a test application located at `ports/esp32/boards/CANARIN_V5/main.py` (or `CANARIN_V6/main.py`) which is frozen into the firmware and runs automatically on boot. 
 
 **Removing the default test or adding a custom application:**
-*   **To remove the default test:** Simply delete or rename `main.py` from the board's directory (`ports/esp32/boards/CANARIN_V5/main.py` or `CANARIN_V6/main.py`) before building the firmware. You may also need to check the `manifest.py` if it explicitly includes `main.py`.
-*   **To add a custom application during build:** Place your custom `.py` files in the board directory (replacing `main.py`) before running the build scripts. These files will be compiled and frozen into the firmware.
+*   **To remove the default test:** Update `manifest.py` in the board's directory (`ports/esp32/boards/CANARIN_V5/main.py` or `CANARIN_V6/main.py`) before building the firmware. You will need to remove the line in `manifest.py` that explicitly includes `main.py`.
+*   **To add a custom application during build:** Place your custom `.py` files in the board directory (replacing `main.py`) and update `manifest.py` to include the script before running the build scripts. These files will be compiled and frozen into the firmware.
 
 **Developing with Thonny:**
 For a rapid development cycle without rebuilding firmware, we recommend using the [Thonny IDE](https://thonny.org/):
@@ -109,23 +113,21 @@ print(f"Running on Canarin Hardware Version: {version}")
 # Returns: "V5" or "V6"
 ```
 
-### 4.2. Power Gating (V6 Load Switches)
+### 4.2. Power Gating (Canarin V6 Specific Load Switches)
 To conserve battery charge, Canarin V6 allows you to cut power completely to the UART sensor rail and the cellular modem or Ethernet slot when not actively taking measurements. On Canarin V5, these calls are safe no-ops.
 
 ```python
 import time
 import canarin
 
-# 1. Power on the sensor rail and cellular modem load switches
+# 1. Power on the sensor rail and cellular modem load switches (V5 does not do anything)
 canarin.enable_sensor_power()
 canarin.enable_netport_power()
 
-# 2. IMPORTANT: Give the sensors and modem time to boot up
 time.sleep(1.0) 
 
-# ... Perform your sensor reads and transmit data ...
 
-# 3. Shutdown power rails to enter low-power sleep mode
+# 2. Shutdown power rails to enter low-power sleep mode (v5 does not do anything)
 canarin.disable_sensor_power()
 canarin.disable_netport_power()
 ```
@@ -169,10 +171,10 @@ import canarin
 # Default I2C0 maps to correct pins automatically (V5: SDA=21/SCL=22 | V6: SDA=1/SCL=2)
 i2c = I2C(0)
 
-# Initialize the driver
+# Initialize the driver, with the i2c object
 bme = canarin.BME280(i2c)
 
-# Take a single measurement (forced mode)
+# Take a single measurement 
 temperature, pressure, humidity = bme.read()
 
 print(f"Temperature: {temperature:.1f} °C")
@@ -233,14 +235,14 @@ if mux.any():
 mux.disable()
 ```
 
-### 7.2. Particulate Matter Sensor (PMS7003)
+### 7.2. PM Sensor (PMS7003)
 Operates in passive (polled) mode at 9600 baud.
 ```python
 import canarin
 
 mux = canarin.UARTPortMux()
 
-# Port mapping is board specific (V5: Channel 1 | V6: Channel 0)
+# Port mapping is board specific (V5: Channel 1 | V6: Channel 0) and needs to be selected appriopriately.
 pm_sensor = canarin.PMS7003(mux, port=0)
 
 # Take a reading
@@ -253,7 +255,7 @@ else:
     print("PM Sensor read failed or timed out.")
 ```
 
-### 7.3. NDIR CO2 Sensor (MH-Z16)
+### 7.3. CO2 Sensor (MH-Z16)
 Operates using the Winsen 9-byte frame query protocol.
 ```python
 import canarin
@@ -270,15 +272,15 @@ else:
     print("CO2 Sensor timed out.")
 ```
 
-### 7.4. Electrochemical CO Sensor (ZE07-CO)
+### 7.4. CO Sensor (ZE07-CO)
 Similar to the CO2 sensor but supports calibration offset (bias).
 ```python
 import canarin
 
 mux = canarin.UARTPortMux()
 
-# Connects to Port 7 on V5 boards. Apply calibration bias offset (e.g. -0.2 ppm)
-co_sensor = canarin.ZE07CO(mux, port=7, bias=-0.2)
+# Connects to Port 7 on V5 boards.
+co_sensor = canarin.ZE07CO(mux, port=7)
 
 co_ppm = co_sensor.read(timeout_ms=1000)
 if co_ppm is not None:
@@ -296,7 +298,7 @@ mux = canarin.UARTPortMux()
 
 # Initialize GPS receiver (V5: Port 6 | V6: Port 2)
 # Configures the receiver to operate in UBX binary mode automatically
-gps = canarin.UBloxGPS(mux, port=2, configure=True)
+gps = canarin.UBloxGPS(mux, port=2, configure=False)
 
 # 1. Query internal module information
 info = gps.detect()
@@ -314,32 +316,12 @@ else:
     print("No GPS satellite fix available yet.")
 ```
 
-### 7.6. Analog Multiplexer (ADCPortMux) *(V5 Only)*
-Routes 4 analog ports into a single ESP32 ADC pin.
-```python
-import canarin
-from machine import ADC
-
-# Initialize the analog mux using standard 11dB attenuation (up to 3.3V)
-adc_mux = canarin.ADCPortMux(atten=ADC.ATTN_11DB)
-
-# Route to analog sensor on Channel 2
-adc_mux.select(2)
-
-raw_val = adc_mux.read()        # 12-bit raw reading (0-4095)
-voltage_uv = adc_mux.read_uv()  # Microvolts calibrated reading
-
-print(f"Raw Reading: {raw_val} | Volts: {voltage_uv / 1_000_000:.2f} V")
-
-# Turn off multiplexer
-adc_mux.disable()
-```
 
 ---
 
 ## 8. Cellular Modem Interface (NETPORT)
 
-`NetPort` runs on UART1 and provides wrappers for configuring and talking to cellular modems (like the SIM7600 series) or hardware Ethernet converters.
+`NetPort` runs on UART1 and provides wrappers for configuring and talking to cellular modems (like the SIM7600 series) or hardware Ethernet converters. The driver to convert UART to working Internet connection is not implemented.
 
 ```python
 import time
@@ -347,15 +329,11 @@ import canarin
 
 # V6 power rails: enable modem load switch first
 canarin.enable_netport_power()
-time.sleep(1.0) # Wait for modem startup boot cycle
+time.sleep(15) # Wait for modem startup boot cycle
 
 # Initialize NetPort wrapper (typically baud 115200 for modems)
 modem = canarin.NetPort(baudrate=115200, timeout_ms=1000)
 
-# Hardware Reset Cycle (V5 toggles PERST pin | V6 toggles Netport Enable load switch)
-print("Cycling modem power reset...")
-modem.reset()
-time.sleep(2.0) # Wait for boot
 
 # Send standard Hayes AT commands
 modem.write(b"AT\r\n")
